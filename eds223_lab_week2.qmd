@@ -1,0 +1,240 @@
+---
+title: "eds223-week2-lab"
+author: "Amanda Overbye"
+format: html
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+# Read in libraries
+rm(list = ls()) #clears everything from working environment
+library(sf) # for handling vector data
+library(tmap) # for making maps
+library(tidyverse) # because we love the tidyverse
+library(spData) # preloaded spatial data
+```
+
+```{r}
+# Building geospatial data from scratch 
+# st stands for spatial temporal but its sf
+london_point <- st_point(c(0.1,51.5))
+
+# Giving it location
+# The () are telling it its cord refence system?
+
+london_geom <- st_sfc(london_point, crs = 4326)
+
+# Making a data frame
+london_attrib <- data.frame(
+  name = "London",
+  temperature = 25,
+  date = as.Date("2017-06-21")
+)
+
+# Attaching things together
+
+london_sf <- st_sf(london_attrib, geometry = london_geom)
+
+# Critical check to make sure object is what we want
+
+class(london_sf)
+
+# check what cord ref system it is
+st_crs(london_sf)
+
+# Looking to see if it is geographic
+st_crs(london_sf)$IsGeographic
+
+```
+
+```{r}
+# Load data object
+world <- spData::world
+
+# Ask names of columns
+
+names(world)
+
+# Seeing life exp
+
+summary(world$lifeExp)
+```
+
+```{r}
+# They make it hard to remove the geo column
+
+world_dlt <- world %>%
+  select(-geom)
+
+# ^ That doesnt work
+
+```
+
+```{r}
+# How to actually delete geom column
+
+world_dlt2 <- st_drop_geometry(world)
+
+# Now we can see that it is just a data frame with no geom column
+
+class(world_dlt2)
+```
+
+## Reprojecting data
+
+```{r}
+# Making a new london 
+
+london_proj <- data.frame(x = 5300, y = 180000) %>%
+  st_as_sf(coords = c("x","y"), crs = "EPSG:27700")
+
+# st_as_sf is useful for reading in data, you must tell it what columns are storing
+# the lat longs, then tell what coord reference system it is in
+
+# Checking if cord ref systems match
+
+st_crs(london_proj) == st_crs(london_sf)
+
+# Making both cord ref systems match
+london_sf_transform <- st_transform(london_sf, crs = st_crs(london_proj))
+```
+
+```{r}
+# Using if else statement for self check
+
+if(st_crs(london_sf_transform) == st_crs(london_proj)){
+  print("CRS of dataset match")
+} else {
+  warning("CRS do not match")
+  }
+```
+
+```{r}
+# Making a map, and telling it what projection to do 
+tm_shape(world, projection = 8857) +
+  tm_fill(col = "area_km2")
+```
+
+```{r}
+# Same map as the last with different projection
+tm_shape(world, projection = 3395) +
+  tm_fill(col = "area_km2")
+```
+
+## Vector attribute subsetting
+
+```{r}
+# You can do all the dplyr functions
+
+world %>%
+  select(name_long, pop)
+
+world %>% 
+  select(-subregion)
+
+world %>%
+  select(name = name_long, population= pop)
+
+```
+
+```{r}
+# Filtering
+world <- world %>%
+  filter(area_km2 <10000)
+```
+
+```{r}
+# The slice max will pick row with highest value in lifeExp
+world %>%
+  filter(continent == "Asia") %>%
+  select(name_long, continent, lifeExp) %>%
+  slice_max(lifeExp) %>%
+  st_drop_geometry()
+  
+```
+
+```{r}
+# Aggregate data
+# Adding up the population of continent
+
+world %>%
+  group_by(continent) %>%
+  summarise(population = sum(pop, na.rm = TRUE)) %>%
+  st_drop_geometry()
+```
+
+## Joins with vector attributes
+
+```{r}
+# Perforning joins with spatial data 
+coffee_data <- spData::coffee_data
+
+# Checking if we have data for all rows
+nrow(coffee_data)
+nrow(world)
+
+```
+
+
+```{r}
+# Left joining by name_long
+world_coffee <- left_join(world, coffee_data, by = "name_long")
+```
+
+```{r}
+# Making a map 
+tm_shape(world_coffee) +
+  tm_fill(col = "coffee_production_2017")
+```
+
+```{r}
+# Using an inner join
+# keeping only the columns that have matches 
+
+world_coffee_inner <- inner_join(world, coffee_data, by = "name_long")
+```
+
+```{r}
+if(nrow(world_coffee_inner) < nrow(coffee_data)){
+  warning("inner join does not match original data. Potential data loss during join")
+}
+```
+
+```{r}
+# Finding what country names are missing
+
+setdiff(coffee_data$name_long, world$name_long)
+
+```
+
+```{r}
+# Figuring out if the same country has different name
+# It is looking for strings with words that start with Dem and Congo
+drc <- stringr::str_subset(world$name_long, "Dem*.+Congo")
+```
+
+```{r}
+# Updating something? 
+
+coffee_data$name_long[stringr::str_detect(coffee_data$name_long, "Congo")] <- drc
+```
+
+```{r}
+if(nrow(world_coffee_inner) < nrow(coffee_data)){
+  warning("inner join does not match original data. Potential data loss during join")
+}
+
+```
+
+```{r}
+tm_shape(world) +
+  tm_polygons (col = "red") +
+tm_shape(world_coffee_inner) +
+  tm_polygons(fill = "coffee_production_2017",
+              title = "Coffee Production 2017",
+              col = "blue") +
+  tm_layout(legend.outside = TRUE)
+```
+
